@@ -7,7 +7,7 @@ Modules
 model        : ODE definitions and default parameter set
 simulation   : Thin wrapper around scipy.odeint
 analysis     : Period detection, sensitivity sweeps, lunar plasticity scan
-fitting      : Comparison of model output to z-score normalised RNA-seq data
+fitting      : RNA-seq loading and fixed-model comparison utilities
 plotting     : Figure helpers
 """
 

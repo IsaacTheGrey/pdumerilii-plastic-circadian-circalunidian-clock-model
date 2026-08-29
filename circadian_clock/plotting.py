@@ -14,8 +14,9 @@ import numpy as np
 # Internal helper
 # ---------------------------------------------------------------------------
 
-def _finish(fig, save_path: str | None):
-    fig.tight_layout()
+def _finish(fig, save_path: str | None, tight: bool = True):
+    if tight:
+        fig.tight_layout()
     if save_path is None:
         plt.show()
     else:
@@ -28,13 +29,28 @@ def _finish(fig, save_path: str | None):
 # ---------------------------------------------------------------------------
 
 def plot_main_results(t_asymp, solution, periods, power, dominant_period,
-                      save_path: str | None = None):
-    """Three-panel summary: trajectories, phase plot, periodogram."""
+                      save_path: str | None = None,
+                      t_absolute=None, highlight_window_h: float = 24.0):
+    """Three-panel summary: trajectories, phase plot, periodogram.
+
+    Parameters
+    ----------
+    t_absolute : array-like, optional
+        Absolute simulation time (hours) for each row of ``solution``. When
+        supplied, the phase plot highlights the trajectory segments that fall
+        near full moon (lunar phase ≈ 0) and new moon (lunar phase ≈
+        T_LUNAR/2) — the two extremes of the lunar drive. Without it, the
+        phase plot is drawn in a single colour as before.
+    highlight_window_h : float
+        Half-width (hours) of the window around FM and NM to highlight.
+        Points whose lunar phase is within this distance of 0 or T_LUNAR/2
+        are coloured. Default 24 h (~one circadian cycle either side).
+    """
     fig, axs = plt.subplots(1, 3, figsize=(22, 7))
 
-    axs[0].plot(t_asymp, solution[:, 0], label='BMAL (X)')
-    axs[0].plot(t_asymp, solution[:, 1], label='per (Y)')
-    axs[0].plot(t_asymp, solution[:, 5], label='cwo mRNA (C)', color='orange')
+    axs[0].plot(t_asymp, solution[:, 0], label='CLK:BMAL (X)')
+    axs[0].plot(t_asymp, solution[:, 1], label='per/tr-cry (Y)')
+    #axs[0].plot(t_asymp, solution[:, 5], label='cwo mRNA (C)', color='orange')
     axs[0].plot(t_asymp, solution[:, 6], label='CWO protein (W)', color='red')
     axs[0].legend(fontsize=11, loc='upper right')
     axs[0].set_xlabel('Time [h]', fontsize=13)
@@ -43,7 +59,33 @@ def plot_main_results(t_asymp, solution, periods, power, dominant_period,
     axs[0].tick_params(axis='both', which='major', labelsize=11)
     axs[0].set_title('Trajectories', fontsize=13)
 
-    axs[1].plot(solution[:, 0], solution[:, 2], color='grey', lw=0.8)
+    # Phase plot — full trajectory in grey as a backdrop
+    axs[1].plot(solution[:, 0], solution[:, 2], color='lightgrey', lw=0.8,
+                zorder=1)
+
+    if t_absolute is not None:
+        from .model import T_LUNAR
+        t_absolute = np.asarray(t_absolute, dtype=float)
+        lunar_phase = t_absolute % T_LUNAR
+
+        # Distance to FM (phase 0, equivalently T_LUNAR) and to NM (T_LUNAR/2),
+        # measured circularly so the wrap-around at 0/T_LUNAR is handled.
+        d_fm = np.minimum(lunar_phase, T_LUNAR - lunar_phase)
+        d_nm = np.abs(lunar_phase - T_LUNAR / 2.0)
+
+        fm_mask = d_fm <= highlight_window_h
+        nm_mask = d_nm <= highlight_window_h
+
+        # Plot highlighted segments as scatter so disjoint runs don't get
+        # joined by spurious connecting lines.
+        axs[1].scatter(solution[fm_mask, 0], solution[fm_mask, 2],
+                       s=6, color='#1f77b4', zorder=3,
+                       label='Full moon')
+        axs[1].scatter(solution[nm_mask, 0], solution[nm_mask, 2],
+                       s=6, color='#d62728', zorder=3,
+                       label='New moon')
+        axs[1].legend(fontsize=10, loc='best')
+
     axs[1].set_xlabel('CLK/BMAL [a.u.]', fontsize=13)
     axs[1].set_ylabel('PER/tr-CRY [a.u.]', fontsize=13)
     axs[1].tick_params(axis='both', which='major', labelsize=11)
@@ -96,6 +138,79 @@ def plot_sensitivity_results(sensitivity_results: dict,
     _finish(fig, save_path)
 
 
+def _plot_validated_sweep(rows, parameters, title,
+                          save_path: str | None = None):
+    """Plot fixed-phase sweep rows, marking loss of rhythmicity explicitly."""
+    ncols = 2
+    nrows = (len(parameters) + ncols - 1) // ncols
+    fig, axs = plt.subplots(nrows, ncols, figsize=(13, 4.8 * nrows),
+                            squeeze=False, sharex=True, sharey=True)
+    phase_styles = {
+        'Full moon': ('#2563eb', 'o'),
+        'Mean drive': ('#374151', 's'),
+        'New moon': ('#dc2626', '^'),
+    }
+
+    for index, parameter in enumerate(parameters):
+        ax = axs[index // ncols, index % ncols]
+        subset = [row for row in rows if row['Parameter'] == parameter]
+        for phase, (colour, marker) in phase_styles.items():
+            phase_rows = sorted(
+                (row for row in subset if row['Lunar Phase'] == phase),
+                key=lambda row: row['Fold Change'])
+            if not phase_rows:
+                continue
+            folds = np.asarray([row['Fold Change'] for row in phase_rows])
+            periods = np.asarray([row['Period (h)'] for row in phase_rows],
+                                 dtype=float)
+            ax.plot(folds, periods, color=colour, marker=marker, ms=5,
+                    lw=1.8, label=phase)
+            failed = np.isnan(periods)
+            if failed.any():
+                ax.scatter(folds[failed], np.full(failed.sum(), 18.25),
+                           marker='x', s=45, color=colour, linewidth=1.5)
+
+        ax.axvline(1.0, color='0.55', lw=1.0, ls=':')
+        ax.axhline(24.0, color='0.35', lw=1.0, ls='--')
+        ax.axhspan(22.0, 25.0, color='#16a34a', alpha=0.09)
+        ax.set_xscale('log', base=2)
+        ax.set_xticks([0.5, 0.7071, 1.0, 1.4142, 2.0])
+        ax.set_xticklabels(['0.5', '0.71', '1', '1.41', '2'])
+        ax.set_xlim(0.48, 2.08)
+        ax.set_ylim(18.0, 30.0)
+        ax.set_title(parameter)
+        ax.set_xlabel('Fold change from baseline')
+        ax.set_ylabel('Period [h]')
+        ax.grid(True, which='both', linestyle=':', alpha=0.35)
+
+    for index in range(len(parameters), nrows * ncols):
+        axs[index // ncols, index % ncols].axis('off')
+
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc='upper center', ncol=3,
+                   bbox_to_anchor=(0.5, 0.995))
+    fig.suptitle(title, y=1.02, fontsize=14)
+    fig.text(0.5, 0.005,
+             '× at 18.25 h denotes loss of a sustained circadian rhythm',
+             ha='center', fontsize=9, color='0.35')
+    _finish(fig, save_path)
+
+
+def plot_cwo_phase_sensitivity(rows, save_path: str | None = None):
+    """Four-parameter C/W sensitivity at three frozen lunar drives."""
+    _plot_validated_sweep(
+        rows, ['nu11', 'nu12', 'nu13', 'nu14'],
+        'CWO kinetic sensitivity at fixed lunar phases', save_path)
+
+
+def plot_w_gain_turnover(rows, save_path: str | None = None):
+    """Separate CWO protein abundance gain from turnover speed."""
+    _plot_validated_sweep(
+        rows, ['W gain (nu13/nu14)', 'W turnover speed'],
+        'CWO protein abundance versus turnover', save_path)
+
+
 # ---------------------------------------------------------------------------
 # Plasticity & lunar oscillation
 # ---------------------------------------------------------------------------
@@ -124,15 +239,16 @@ def plot_lunar_period_oscillation(lunar_times, periods,
     fig, ax = plt.subplots(figsize=(10, 6))
     valid = ~np.isnan(periods)
     ax.plot(lunar_times[valid], periods[valid],
-            color='blue', lw=2.5, label='Measured period')
+            color='blue', lw=2.5, label='Model-estimated period')
     ax.axhspan(22, 25, color='green', alpha=0.10,
                label='Target plasticity (22–25 h)')
     ax.axhline(24, color='red', ls='--', alpha=0.5)
 
     if valid.any():
-        y_top = np.nanmax(periods[valid])
-        ax.text(0,   y_top, 'Full moon (trough L)', ha='center', color='gray')
-        ax.text(354, y_top, 'New moon (peak L)',    ha='center', color='gray')
+        ax.text(0.01, 0.97, 'Full moon (trough L)', transform=ax.transAxes,
+                ha='left', va='top', color='gray')
+        ax.text(0.50, 0.97, 'New moon (peak L)', transform=ax.transAxes,
+                ha='center', va='top', color='gray')
 
     ax.set_xlabel('Time within lunar month [h]', fontsize=12)
     ax.set_ylabel('Circadian period [h]', fontsize=12)
@@ -141,6 +257,67 @@ def plot_lunar_period_oscillation(lunar_times, periods,
     ax.legend(loc='lower right')
     ax.grid(True, alpha=0.3)
     _finish(fig, save_path)
+
+
+def plot_lunar_limit_cycles(cycles, save_path: str | None = None):
+    """Phase-plane loops across the lunar month, using CLK/BMAL versus PER."""
+    if not cycles:
+        raise ValueError('No complete circadian cycles were supplied')
+
+    from matplotlib.collections import LineCollection
+    from matplotlib.colors import Normalize
+    from .model import T_LUNAR
+
+    cmap = plt.get_cmap('twilight_shifted')
+    norm = Normalize(0.0, T_LUNAR)
+    fig, axs = plt.subplots(1, 2, figsize=(13, 5.8), sharex=True, sharey=True)
+
+    paths = [np.column_stack([cycle['x'], cycle['y']]) for cycle in cycles]
+    phases = np.asarray([cycle['lunar_phase_h'] for cycle in cycles])
+    collection = LineCollection(paths, cmap=cmap, norm=norm,
+                                linewidths=1.4, alpha=0.82)
+    collection.set_array(phases)
+    axs[0].add_collection(collection)
+    axs[0].autoscale_view()
+    axs[0].set_title('All circadian loops over one lunar month')
+
+    representative_phases = [
+        ('FM', 0.0),
+        ('1st quarter', T_LUNAR / 4.0),
+        ('NM', T_LUNAR / 2.0),
+        ('Last quarter', 3.0 * T_LUNAR / 4.0),
+    ]
+    for label, target_phase in representative_phases:
+        cycle = min(
+            cycles,
+            key=lambda item: min(
+                abs(item['lunar_phase_h'] - target_phase),
+                T_LUNAR - abs(item['lunar_phase_h'] - target_phase)))
+        colour = cmap(norm(target_phase))
+        axs[1].plot(cycle['x'], cycle['y'], color=colour, lw=2.2,
+                    label=f"{label}: P={cycle['period_h']:.2f} h")
+        axs[1].scatter(cycle['x'][0], cycle['y'][0], color=colour,
+                       s=28, edgecolor='white', linewidth=0.7, zorder=3)
+
+    axs[1].set_title('Representative lunar phases')
+    axs[1].legend(fontsize=9, frameon=True)
+
+    for ax in axs:
+        ax.set_xlabel('CLK/BMAL (X) [a.u.]')
+        ax.set_ylabel('PER/tr-CRY (Z) [a.u.]')
+        ax.grid(True, linestyle=':', alpha=0.35)
+        ax.set_box_aspect(1)
+
+    colourbar = fig.colorbar(collection, ax=axs, pad=0.025, fraction=0.04)
+    colourbar.set_label('Lunar phase')
+    colourbar.set_ticks([0.0, T_LUNAR / 4.0, T_LUNAR / 2.0,
+                         3.0 * T_LUNAR / 4.0, T_LUNAR])
+    colourbar.set_ticklabels(['FM', '1st quarter', 'NM', 'Last quarter', 'FM'])
+    fig.suptitle('Evolution of the circadian limit cycle over the lunar month',
+                 fontsize=14)
+    fig.subplots_adjust(left=0.07, right=0.88, bottom=0.12, top=0.84,
+                        wspace=0.22)
+    _finish(fig, save_path, tight=False)
 
 
 # ---------------------------------------------------------------------------

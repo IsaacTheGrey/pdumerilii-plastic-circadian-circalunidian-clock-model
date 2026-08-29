@@ -82,14 +82,14 @@ def goodwin_model_lunar(y, t, parameters):
     # Core clock
     dXdt = (p['nu1'] * inhib_Z * inhib_W * inhib_S * PFL
             - p['nu2'] * X / (p['K2'] + X))
-    dYdt = (p['nu3'] * X * p['K3']**p['hill'] / (p['K3']**p['hill'] + W**p['hill_W'])
+    dYdt = (p['nu3'] * X * p['K3']**p['hill_W'] / (p['K3']**p['hill_W'] + W**p['hill_W'])
             - p['nu4'] * Y / (p['K4'] + Y))
     dZdt =  p['nu5'] * Y - p['nu6'] * Z / (p['K6'] + Z)
     dRdt =  p['nu7'] * X - p['nu8'] * R / (p['K7'] + R)
     dSdt =  p['nu9'] * R - p['nu10'] * S / (p['K8'] + S)
 
     # CWO arm — synthesis is lunar-modulated through L_t
-    dCdt = (p['nu11'] * L_t * X * p['K5']**p['hill'] / (p['K5']**p['hill'] + W**p['hill_W'])
+    dCdt = (p['nu11'] * L_t * X * p['K5']**p['hill_W'] / (p['K5']**p['hill_W'] + W**p['hill_W'])
             - p['nu12'] * C / (p['K9'] + C))
     # Linear protein degradation (see module docstring)
     dWdt = p['nu13'] * C - p['nu14'] * W
@@ -129,7 +129,11 @@ def generate_default_parameters() -> dict:
         # cooperativity (e.g. 2.5) causes the negative feedback to be too
         # switch-like and damps the clock at NM.
         'K1':  1.0, 'K2': 1.0, 'K3': 1.0, 'K4': 1.0,
-        'K5':  0.8, 'K6': 1.0, 'K7': 1.0, 'K8': 1.0, 'K9': 1.0,
+        # The legacy equation used K5**hill with hill=4 and hill_W=1,
+        # making its actual W half-repression point 0.8**4 = 0.4096.  Store
+        # that effective half-point directly so the dimensionally consistent
+        # hill_W expression above preserves the published baseline dynamics.
+        'K5':  0.4096, 'K6': 1.0, 'K7': 1.0, 'K8': 1.0, 'K9': 1.0,
         'K_W': 2.0,
         'hill': 4, 'hill_S': 1.5, 'hill_W': 1.0,
 

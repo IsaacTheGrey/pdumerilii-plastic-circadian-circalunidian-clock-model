@@ -27,7 +27,7 @@ system and the manuscript Methods for the symbolic equations.
 │   ├── model.py            ODE definitions and default parameters
 │   ├── simulation.py       Wrappers around scipy.integrate.odeint
 │   ├── analysis.py         Period detection, sensitivity & plasticity sweeps
-│   ├── fitting.py          RNA-seq data fitting and goodness-of-fit
+│   ├── fitting.py          RNA-seq loading and model-overlay utilities
 │   └── plotting.py         Figure helpers
 ├── run_simulation.py       End-to-end driver (produces all figures)
 ├── observed_gene_exp.xlsx  Observed z-scored RNA-seq expression (cwo, clk, per, pdp1)
@@ -58,51 +58,43 @@ python run_simulation.py
 This runs, in order:
 
 1. A long simulation showing steady-state trajectories, phase plot, and periodogram.
-2. A parameter-sensitivity sweep over the CWO-relevant kinetics.
-3. A sliding-window scan of the circadian period across one lunar month.
-4. Comparison of z-scored model output against observed RNA-seq data.
-5. A panel figure of gene oscillations across the lunar month.
+2. A fixed-phase sensitivity sweep of CWO production and degradation
+   kinetics at full moon, mean lunar drive, and new moon.
+3. A mechanistic sweep separating CWO protein abundance gain
+   (`nu13/nu14`) from protein turnover speed.
+4. A sliding-window scan of the circadian period across one lunar month.
+5. A CLK/BMAL–PER phase-plane figure showing how the circadian limit cycle
+   changes across the lunar month.
+6. Comparison of z-scored model output against observed RNA-seq data.
+7. A panel figure of gene oscillations across the lunar month.
 
 Outputs (PNG figures and one CSV) land in `figures/`. Expensive sections can
 be toggled off near the top of `main()` in `run_simulation.py`. The full run
 takes 5–15 minutes on a modern laptop, depending on core count (the
-sensitivity sweep parallelises automatically).
+sensitivity sweeps parallelise automatically).
 
-## Fitting to your own data
+## Period and rhythmicity validation
 
-The fitting machinery in `circadian_clock/fitting.py` accepts any
-`{gene: (zt_hours, mean, sd)}` mapping. To fit a subset of parameters against
-the provided RNA-seq data:
+Sensitivity periods are estimated from refined CLK/BMAL peak times after a
+long burn-in at a frozen lunar drive. A period is reported only when the
+trajectory has sufficient amplitude, remains sustained across the analysis
+window, contains enough peaks, and has regular inter-peak intervals. Failed
+simulations remain in the CSV with a `Status` value and a missing period; they
+are shown as crosses in the figures rather than being assigned the edge of a
+Fourier search band.
 
-```python
-from circadian_clock.fitting import fit_parameters, load_observed
-from circadian_clock.model import generate_default_parameters
+All kinetic sensitivity axes are fold changes from the default parameter set.
+The W mechanism analysis varies translation alone to change abundance gain,
+then scales translation and degradation together to change turnover while
+holding the gain constant.
 
-obs = load_observed('observed_gene_exp.xlsx')
-p0  = generate_default_parameters()
+## RNA-seq comparison
 
-free = ['nu3', 'nu4', 'nu5', 'nu6', 'zt0_offset_h']
-bounds = {'nu3': (0.1, 2.0), 'nu4': (0.05, 1.5),
-          'nu5': (0.2, 2.0), 'nu6': (0.1, 1.5),
-          'zt0_offset_h': (-12.0, 12.0)}
-
-fitted, info = fit_parameters(
-    obs, free, base_parameters=p0,
-    bounds=bounds,
-    lunar_phase_h=354.0,        # data sampled near NM (peak L_t, peak cwo)
-    zt0_offset_h=None,           # fit the offset
-    genes=['cwo', 'per'],        # skip noisy channels
-    period_band=(22.0, 26.0),
-    period_penalty=300.0,
-    options={'maxiter': 40, 'popsize': 12, 'seed': 42, 'polish': False})
-```
-
-The optimiser uses differential evolution with biology-aware penalties: it
-rejects damped trials, suppresses non-sinusoidal "relaxation-oscillator"
-regimes via a duty-cycle term, and requires the oscillator to remain alive
-at the opposite lunar phase so single-snapshot fitting does not collapse
-lunar plasticity. See the docstring of `fit_parameters` for the full
-list of knobs.
+The end-to-end script can overlay the fixed default model on the supplied
+z-scored RNA-seq observations. Automatic kinetic-parameter optimisation is
+not part of the publication workflow; the sparse time-course data do not
+constrain the full nonlinear model reliably enough to justify fitted kinetic
+constants.
 
 ## Citation
 
@@ -113,4 +105,3 @@ If you use this code, please cite our manuscript nd the underlying Goodwin model
 ## Contact
 Federico Scaramuzza
 ORCID: 0000-0003-4360-3883
-
