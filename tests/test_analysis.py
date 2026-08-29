@@ -2,7 +2,8 @@ import unittest
 
 import numpy as np
 
-from circadian_clock.analysis import (analyze_lunar_limit_cycles,
+from circadian_clock.analysis import (_resolve_sweep_lunar_drives,
+                                      analyze_lunar_limit_cycles,
                                       dominant_period, rhythm_metrics)
 from circadian_clock.model import generate_default_parameters
 
@@ -37,6 +38,18 @@ class RhythmMetricsTests(unittest.TestCase):
                             for cycle in cycles))
         self.assertLess(cycles[0]['lunar_phase_h'],
                         cycles[-1]['lunar_phase_h'])
+
+    def test_parameter_sweeps_exclude_lunar_phases_by_default(self):
+        drives = _resolve_sweep_lunar_drives(None, False)
+        self.assertEqual(drives, {'Constant mean': 0.75})
+
+    def test_parameter_sweeps_can_include_fixed_lunar_phases(self):
+        drives = _resolve_sweep_lunar_drives(None, True)
+        self.assertEqual(drives, {
+            'Full moon': 0.50,
+            'Mean drive': 0.75,
+            'New moon': 1.00,
+        })
 
 
 if __name__ == '__main__':

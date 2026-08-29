@@ -7,7 +7,7 @@ Run this from the directory that contains the ``circadian_clock`` package:
 The script performs, in order:
     1. A long simulation to display steady-state trajectories,
        phase plot and periodogram.
-    2. A fixed-phase sweep of all four C/W production/degradation kinetics.
+    2. A constant-mean-drive sweep of all four C/W kinetics.
     3. A sweep separating W abundance gain from W turnover speed.
     4. A sliding-window scan of circadian period across one lunar month.
     5. A phase-plane view of limit-cycle evolution over the lunar month.
@@ -35,8 +35,10 @@ from circadian_clock.analysis import (
     save_publication_sweep_results,
 )
 from circadian_clock.fitting import load_observed, weighted_chi2
-from circadian_clock.model import T_LUNAR, generate_default_parameters
+from circadian_clock.model import (DEFAULT_INITIAL_STATE, T_LUNAR,
+                                   generate_default_parameters)
 from circadian_clock.plotting import (
+    plot_cwo_amount_vs_period,
     plot_cwo_phase_sensitivity,
     plot_genes_over_lunar_month,
     plot_lunar_period_oscillation,
@@ -64,10 +66,11 @@ ZT0_OFFSET_H = 20
 def main():
     # ---- Toggles for expensive sections ---------------------------------
     RUN_CWO_SWEEPS  = True
+    INCLUDE_LUNAR_PHASES_IN_SWEEPS = True
     RUN_LUNAR_SCAN  = True
     RUN_PHASE_PLANE = True
-    RUN_RNASEQ_OVERLAY = True
-    RUN_LUNAR_GENES = True
+    RUN_RNASEQ_OVERLAY = False
+    RUN_LUNAR_GENES = False
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -78,7 +81,7 @@ def main():
     # trajectory in memory.
     t = np.arange(0.0, 3.0 * T_LUNAR, dt)
     # 7 state variables: [X, Y, Z, R, S, C, W]
-    y0 = [1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+    y0 = DEFAULT_INITIAL_STATE
     base_parameters = generate_default_parameters()
 
     print('1) Long simulation for steady-state trajectories...')
@@ -102,10 +105,14 @@ def main():
 
     # ---- 2–3. Validated CWO sensitivity and mechanism sweeps ------------
     if RUN_CWO_SWEEPS:
-        print('2) Fixed-phase C/W kinetic sensitivity sweep...')
+        phase_note = ('including fixed lunar phases'
+                      if INCLUDE_LUNAR_PHASES_IN_SWEEPS
+                      else 'without lunar phase comparisons')
+        print(f'2) C/W kinetic sensitivity {phase_note}...')
         sweep_processes = min(4, os.cpu_count() or 1)
         sens = analyze_cwo_phase_sensitivity(
-            base_parameters, y0, processes=sweep_processes)
+            base_parameters, y0, processes=sweep_processes,
+            include_lunar_phases=INCLUDE_LUNAR_PHASES_IN_SWEEPS)
         save_publication_sweep_results(
             sens, os.path.join(OUTPUT_DIR, 'sensitivity_results.csv'))
         plot_cwo_phase_sensitivity(
@@ -113,13 +120,18 @@ def main():
 
         print('3) W abundance-gain versus turnover sweep...')
         mechanisms = analyze_w_gain_turnover(
-            base_parameters, y0, processes=sweep_processes)
+            base_parameters, y0, processes=sweep_processes,
+            include_lunar_phases=INCLUDE_LUNAR_PHASES_IN_SWEEPS)
         save_publication_sweep_results(
             mechanisms,
             os.path.join(OUTPUT_DIR, 'w_gain_turnover_results.csv'))
         plot_w_gain_turnover(
             mechanisms,
             save_path=os.path.join(OUTPUT_DIR, 'cwo_plasticity.png'))
+        plot_cwo_amount_vs_period(
+            mechanisms,
+            save_path=os.path.join(OUTPUT_DIR,
+                                   'cwo_amount_vs_period.png'))
 
     # ---- 4. Lunar plasticity --------------------------------------------
     if RUN_LUNAR_SCAN:

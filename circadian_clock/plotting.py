@@ -146,6 +146,7 @@ def _plot_validated_sweep(rows, parameters, title,
     fig, axs = plt.subplots(nrows, ncols, figsize=(13, 4.8 * nrows),
                             squeeze=False, sharex=True, sharey=True)
     phase_styles = {
+        'Constant mean': ('#111827', 'o'),
         'Full moon': ('#2563eb', 'o'),
         'Mean drive': ('#374151', 's'),
         'New moon': ('#dc2626', '^'),
@@ -156,7 +157,7 @@ def _plot_validated_sweep(rows, parameters, title,
         subset = [row for row in rows if row['Parameter'] == parameter]
         for phase, (colour, marker) in phase_styles.items():
             phase_rows = sorted(
-                (row for row in subset if row['Lunar Phase'] == phase),
+                (row for row in subset if row['Drive Condition'] == phase),
                 key=lambda row: row['Fold Change'])
             if not phase_rows:
                 continue
@@ -198,17 +199,100 @@ def _plot_validated_sweep(rows, parameters, title,
 
 
 def plot_cwo_phase_sensitivity(rows, save_path: str | None = None):
-    """Four-parameter C/W sensitivity at three frozen lunar drives."""
+    """Four-parameter C/W sensitivity with optional fixed lunar phases."""
+    n_conditions = len({row['Drive Condition'] for row in rows})
+    drive_text = ('at fixed lunar phases' if n_conditions > 1
+                  else 'without lunar phase comparisons')
     _plot_validated_sweep(
         rows, ['nu11', 'nu12', 'nu13', 'nu14'],
-        'CWO kinetic sensitivity at fixed lunar phases', save_path)
+        f'CWO kinetic sensitivity {drive_text}', save_path)
 
 
 def plot_w_gain_turnover(rows, save_path: str | None = None):
-    """Separate CWO protein abundance gain from turnover speed."""
+    """Separate CWO abundance gain and turnover at optional fixed phases."""
+    n_conditions = len({row['Drive Condition'] for row in rows})
+    drive_text = ('at fixed lunar phases' if n_conditions > 1
+                  else 'without lunar phase comparisons')
     _plot_validated_sweep(
         rows, ['W gain (nu13/nu14)', 'W turnover speed'],
-        'CWO protein abundance versus turnover', save_path)
+        f'CWO protein abundance versus turnover {drive_text}',
+        save_path)
+
+
+def plot_cwo_amount_vs_period(rows, save_path: str | None = None):
+    """Plot circadian period against mean simulated CWO protein abundance.
+
+    The two panels keep the W-gain and W-turnover perturbations separate.
+    Point colour shows parameter fold change and marker shape shows the fixed
+    lunar drive. The star marks the baseline parameter value (1x). Rows
+    without a valid sustained period are omitted.
+    """
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    parameters = ['W gain (nu13/nu14)', 'W turnover speed']
+    phase_markers = {
+        'Constant mean': 'o',
+        'Full moon': 'o',
+        'Mean drive': 's',
+        'New moon': '^',
+    }
+    valid_folds = [row['Fold Change'] for row in rows
+                   if np.isfinite(row['Period (h)'])]
+    max_log_fold = max(abs(np.log2(valid_folds)).max(), 1.0)
+    norm = Normalize(-max_log_fold, max_log_fold)
+    cmap = plt.get_cmap('coolwarm')
+    fig, axs = plt.subplots(1, 2, figsize=(14, 5.6), sharey=True)
+
+    for ax, parameter in zip(axs, parameters):
+        subset = [row for row in rows if row['Parameter'] == parameter]
+        for phase, marker in phase_markers.items():
+            phase_rows = sorted(
+                (row for row in subset if row['Drive Condition'] == phase),
+                key=lambda row: row['Fold Change'])
+            if not phase_rows:
+                continue
+
+            mean_w = np.asarray([row['Mean W'] for row in phase_rows],
+                                dtype=float)
+            periods = np.asarray([row['Period (h)'] for row in phase_rows],
+                                 dtype=float)
+            log_folds = np.log2([row['Fold Change'] for row in phase_rows])
+            valid = np.isfinite(mean_w) & np.isfinite(periods)
+            ax.scatter(mean_w[valid], periods[valid], c=log_folds[valid],
+                       cmap=cmap, norm=norm, marker=marker, s=50,
+                       edgecolor='0.2', linewidth=0.45, label=phase,
+                       zorder=3)
+
+            baseline = np.asarray([
+                np.isclose(row['Fold Change'], 1.0) for row in phase_rows
+            ]) & valid
+            if baseline.any():
+                ax.scatter(mean_w[baseline], periods[baseline], marker='*',
+                           s=150, color='white', edgecolor='black',
+                           linewidth=0.9, zorder=4)
+
+        ax.axhline(24.0, color='0.35', lw=1.0, ls='--')
+        ax.axhspan(22.0, 25.0, color='#16a34a', alpha=0.09)
+        ax.set_title(parameter)
+        ax.set_xlabel('Mean CWO protein, W [a.u.]')
+        ax.set_ylabel('Period [h]')
+        ax.grid(True, linestyle=':', alpha=0.35)
+
+    handles, labels = axs[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc='upper center', ncol=3,
+                   bbox_to_anchor=(0.46, 0.89))
+    colourbar = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=axs,
+                             pad=0.025, fraction=0.028)
+    colourbar.set_label('Parameter fold change (log2 colour scale)')
+    fig.suptitle('Average CWO abundance in relation to circadian period',
+                 y=0.97, fontsize=14)
+    fig.text(0.46, 0.035, 'Star denotes the baseline parameter set',
+             ha='center', fontsize=9, color='0.35')
+    fig.subplots_adjust(left=0.07, right=0.86, bottom=0.14, top=0.79,
+                        wspace=0.10)
+    _finish(fig, save_path, tight=False)
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +488,7 @@ def plot_genes_over_lunar_month(parameters: dict,
     genes : dict | list | None
         Either a dict ``{label: state_index}`` for full control, or a list of
         names from :data:`fitting.GENE_TO_STATE_INDEX` (``'cwo'``, ``'clk'``,
-        ``'per'``), or ``None`` for a sensible default panel of four traces.
+        ``'per'``), or ``None`` for a sensible default panel.
     n_lunar_cycles : int
         How many lunar cycles to plot (after the burn-in cycle).
     zscore : bool
@@ -414,7 +498,7 @@ def plot_genes_over_lunar_month(parameters: dict,
         Overlay the L_t drive on a secondary axis of each panel.
     """
     from .fitting import GENE_TO_STATE_INDEX, _zscore
-    from .model import T_LUNAR
+    from .model import DEFAULT_INITIAL_STATE, T_LUNAR
     from .simulation import integrate_model
 
     if genes is None:
@@ -428,7 +512,7 @@ def plot_genes_over_lunar_month(parameters: dict,
         genes = {g: GENE_TO_STATE_INDEX[g] for g in genes}
 
     if y0 is None:
-        y0 = [1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+        y0 = DEFAULT_INITIAL_STATE
 
     # Two burn-in lunar cycles, then n_lunar_cycles for display. The active
     # lunar drive prevents the system from ever reaching a fixed steady

@@ -12,8 +12,8 @@ lunar timescale and doing so in anti-phase.
 
 ## Model summary
 
-Seven state variables: CLK/BMAL (X), *per* mRNA (Y), PER/tr-CRY (Z),
-*rev-erb* mRNA (R), REV-ERB (S), *cwo* mRNA (C), CWO protein (W).
+Seven state variables: active CLK/BMAL (X), *per* mRNA (Y), PER/tr-CRY (Z),
+*rev-erb* mRNA (R), REV-ERB (S), *cwo* mRNA (C), and CWO protein (W).
 A single lunar drive `L(t) = 0.75 − 0.25·cos(2π t / T_lunar)` with
 `T_lunar = 708 h` multiplies the CWO mRNA synthesis term, troughing at full
 moon and peaking at new moon. See `circadian_clock/model.py` for the full ODE
@@ -58,10 +58,13 @@ python run_simulation.py
 This runs, in order:
 
 1. A long simulation showing steady-state trajectories, phase plot, and periodogram.
-2. A fixed-phase sensitivity sweep of CWO production and degradation
-   kinetics at full moon, mean lunar drive, and new moon.
+2. A sensitivity sweep of CWO production and degradation kinetics with the
+   lunar multiplier held at its cycle mean (`L = 0.75`) by default. Set
+   `INCLUDE_LUNAR_PHASES_IN_SWEEPS = True` in `run_simulation.py` to compare
+   fixed full-moon, mean-drive, and new-moon conditions instead.
 3. A mechanistic sweep separating CWO protein abundance gain
-   (`nu13/nu14`) from protein turnover speed.
+   (`nu13/nu14`) from protein turnover speed, including a separate plot of
+   mean CWO protein abundance against period.
 4. A sliding-window scan of the circadian period across one lunar month.
 5. A CLK/BMAL–PER phase-plane figure showing how the circadian limit cycle
    changes across the lunar month.
@@ -76,7 +79,8 @@ sensitivity sweeps parallelise automatically).
 ## Period and rhythmicity validation
 
 Sensitivity periods are estimated from refined CLK/BMAL peak times after a
-long burn-in at a frozen lunar drive. A period is reported only when the
+long burn-in with the lunar multiplier fixed at its cycle mean. This removes
+lunar modulation while preserving average CWO synthesis. A period is reported only when the
 trajectory has sufficient amplitude, remains sustained across the analysis
 window, contains enough peaks, and has regular inter-peak intervals. Failed
 simulations remain in the CSV with a `Status` value and a missing period; they
@@ -86,7 +90,16 @@ Fourier search band.
 All kinetic sensitivity axes are fold changes from the default parameter set.
 The W mechanism analysis varies translation alone to change abundance gain,
 then scales translation and degradation together to change turnover while
-holding the gain constant.
+holding the gain constant. Lunar-phase comparisons are optional and disabled
+by default for both parameter sweeps.
+
+With the default parameter set, increasing W turnover speed over the tested
+0.5×–2× range monotonically shortens the period while preserving the W gain
+`nu13/nu14`. This relationship remains monotonic at fixed full-moon, mean,
+and new-moon drives. The output CSV includes the turnover rate, corresponding
+W half-life, and W gain so this mechanism can be plotted on physical axes.
+The generated `figures/cwo_amount_vs_period.png` directly plots the mean
+simulated CWO protein level against the detected circadian period.
 
 ## RNA-seq comparison
 

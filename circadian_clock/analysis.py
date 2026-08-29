@@ -13,7 +13,7 @@ from multiprocessing import Pool
 import numpy as np
 from scipy.signal import find_peaks, periodogram
 
-from .model import T_LUNAR, _LT_OVERRIDE_KEY
+from .model import DEFAULT_INITIAL_STATE, T_LUNAR, _LT_OVERRIDE_KEY
 from .simulation import integrate_model
 
 
@@ -226,8 +226,8 @@ def _fixed_phase_sweep_worker(args):
         'Parameter': name,
         'Fold Change': float(fold),
         'Parameter Value': float(parameter_value),
-        'Lunar Phase': lunar_label,
-        'Lunar Drive': float(lunar_drive),
+        'Drive Condition': lunar_label,
+        'Fixed L': float(lunar_drive),
         'Period (h)': metrics['period'],
         'Relative Amplitude': metrics['relative_amplitude'],
         'Interval CV': metrics['interval_cv'],
@@ -235,6 +235,9 @@ def _fixed_phase_sweep_worker(args):
         'Sustained Ratio': metrics['sustained_ratio'],
         'Mean C': float(np.mean(tail[:, 5])),
         'Mean W': float(np.mean(tail[:, 6])),
+        'W Gain (nu13/nu14)': float(p['nu13'] / p['nu14']),
+        'W Turnover Rate (h^-1)': float(p['nu14']),
+        'W Half-life (h)': float(np.log(2.0) / p['nu14']),
         'Rhythmic': metrics['rhythmic'],
         'Status': metrics['status'],
     }
@@ -263,6 +266,24 @@ def _run_fixed_phase_sweep(names, base_parameters, y0, folds,
     return rows
 
 
+def _resolve_sweep_lunar_drives(lunar_drives, include_lunar_phases: bool):
+    """Return fixed drive conditions for a publication parameter sweep.
+
+    An explicitly supplied mapping always takes precedence. Otherwise the
+    default is a single constant-mean drive, which removes lunar phase from
+    the sweep. Setting ``include_lunar_phases`` adds the two drive extremes.
+    """
+    if lunar_drives is not None:
+        return lunar_drives
+    if include_lunar_phases:
+        return {
+            'Full moon': 0.50,
+            'Mean drive': 0.75,
+            'New moon': 1.00,
+        }
+    return {'Constant mean': 0.75}
+
+
 def analyze_cwo_phase_sensitivity(base_parameters, y0,
                                   cwo_params=('nu11', 'nu12',
                                               'nu13', 'nu14'),
@@ -272,18 +293,22 @@ def analyze_cwo_phase_sensitivity(base_parameters, y0,
                                   settle_hours: float = 2400.0,
                                   analysis_hours: float = 720.0,
                                   band=(18.0, 30.0),
-                                  processes: int | None = 1):
-    """Publication sweep of all C/W kinetic parameters at fixed lunar drive.
+                                  processes: int | None = 1,
+                                  include_lunar_phases: bool = False):
+    """Publication sweep of all C/W kinetics at fixed lunar drive(s).
 
     The returned long-format rows include period, oscillator-quality metrics,
     and mean C/W abundance. Non-rhythmic simulations retain a row with a NaN
-    period and an explicit failure status.
+    period and an explicit failure status. By default the lunar multiplier is
+    held at its cycle mean (L=0.75), preserving average CWO synthesis while
+    removing phase-dependent forcing. Set ``include_lunar_phases=True`` to
+    compare fixed full-moon (0.5), mean (0.75), and new-moon (1.0) drives.
+    A custom ``lunar_drives`` mapping takes precedence over this switch.
     """
     if folds is None:
         folds = np.geomspace(0.5, 2.0, 13)
-    if lunar_drives is None:
-        lunar_drives = {'Full moon': 0.5, 'Mean drive': 0.75,
-                        'New moon': 1.0}
+    lunar_drives = _resolve_sweep_lunar_drives(
+        lunar_drives, include_lunar_phases)
     return _run_fixed_phase_sweep(
         cwo_params, base_parameters, y0, folds, lunar_drives, dt,
         settle_hours, analysis_hours, band, processes)
@@ -294,18 +319,20 @@ def analyze_w_gain_turnover(base_parameters, y0, folds=None,
                             settle_hours: float = 2400.0,
                             analysis_hours: float = 720.0,
                             band=(18.0, 30.0),
-                            processes: int | None = 1):
-    """Separate W abundance gain from W turnover speed.
+                            processes: int | None = 1,
+                            include_lunar_phases: bool = False):
+    """Separate W abundance gain from turnover at fixed lunar drive(s).
 
     ``W gain`` varies nu13/nu14 at fixed nu14. ``W turnover speed`` scales
     nu13 and nu14 together, preserving their ratio while changing the W
-    response time.
+    response time. The default lunar multiplier is held at its mean, L=0.75.
+    Set ``include_lunar_phases=True`` to also evaluate fixed full-moon and
+    new-moon drives. A custom ``lunar_drives`` mapping takes precedence.
     """
     if folds is None:
         folds = np.geomspace(0.5, 2.0, 13)
-    if lunar_drives is None:
-        lunar_drives = {'Full moon': 0.5, 'Mean drive': 0.75,
-                        'New moon': 1.0}
+    lunar_drives = _resolve_sweep_lunar_drives(
+        lunar_drives, include_lunar_phases)
     names = ('W gain (nu13/nu14)', 'W turnover speed')
     return _run_fixed_phase_sweep(
         names, base_parameters, y0, folds, lunar_drives, dt,
@@ -419,7 +446,7 @@ def analyze_lunar_limit_cycles(base_parameters, y0=None,
     complete loop centred near the final full moon.
     """
     if y0 is None:
-        y0 = [1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+        y0 = DEFAULT_INITIAL_STATE
 
     analysis_start = n_burn_cycles * T_LUNAR
     analysis_end = analysis_start + T_LUNAR

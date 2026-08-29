@@ -22,14 +22,6 @@ L_t troughs (0.5) at t = 0 (FM) and peaks (1.0) at t = T_LUNAR/2 = 354 h
 (NM). Because L_t multiplies CWO synthesis, this makes CWO oscillate with
 higher mean / larger amplitude at NM and lower / smaller at FM, matching
 the biological expectation in *Platynereis dumerilii*.
-
-Notes on protein dynamics
--------------------------
-The CWO protein equation uses *linear* degradation (``-nu14·W``) rather
-than Michaelis-Menten, because saturating MM caps the maximum degradation
-rate and produces runaway accumulation when synthesis is even modestly
-high. With linear degradation, W tracks C with a single time constant
-``1/nu14`` and the protein steady-state level is ``(nu13/nu14)·<C>``.
 """
 
 from __future__ import annotations
@@ -38,6 +30,11 @@ import numpy as np
 
 # Lunar month length in hours.
 T_LUNAR: float = 708.0
+
+# State order shared by simulations, fitting, plotting, and tests.
+DEFAULT_INITIAL_STATE: tuple[float, ...] = (
+    1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+)
 
 # Sentinel parameter key used by simulation.integrate_at_lunar_phase to
 # freeze the lunar drive at a chosen phase. If present in the parameter
@@ -69,12 +66,21 @@ def goodwin_model_lunar(y, t, parameters):
 
     L_t = _lunar_drive(t, p)
 
+    # LSODA can briefly test a slightly negative concentration while taking
+    # an otherwise valid step. Fractional Hill exponents are undefined there,
+    # so rate-law concentrations are clipped at the physical boundary.
+    Z_rate = max(float(Z), 0.0)
+    S_rate = max(float(S), 0.0)
+    W_rate = max(float(W), 0.0)
+
     # Hill repressions. K_W is a dedicated half-repression constant for the
     # CWO arm so the inhibition strength can be tuned independently of
     # K1 (which sets the PER and REV-ERB inhibitions).
-    inhib_Z = p['K1']**p['hill']    / (p['K1']**p['hill']    + Z**p['hill'])
-    inhib_W = p['K_W']**p['hill_W'] / (p['K_W']**p['hill_W'] + W**p['hill_W'])
-    inhib_S = p['K1']**p['hill_S']  / (p['K1']**p['hill_S']  + S**p['hill_S'])
+    inhib_Z = p['K1']**p['hill'] / (p['K1']**p['hill'] + Z_rate**p['hill'])
+    inhib_W = (p['K_W']**p['hill_W'] /
+               (p['K_W']**p['hill_W'] + W_rate**p['hill_W']))
+    inhib_S = (p['K1']**p['hill_S'] /
+               (p['K1']**p['hill_S'] + S_rate**p['hill_S']))
 
     # Positive feedback driving X (CLK/BMAL).
     PFL = p['b'] + p['c'] * X + p['d'] * W
@@ -82,14 +88,16 @@ def goodwin_model_lunar(y, t, parameters):
     # Core clock
     dXdt = (p['nu1'] * inhib_Z * inhib_W * inhib_S * PFL
             - p['nu2'] * X / (p['K2'] + X))
-    dYdt = (p['nu3'] * X * p['K3']**p['hill_W'] / (p['K3']**p['hill_W'] + W**p['hill_W'])
+    dYdt = (p['nu3'] * X * p['K3']**p['hill_W'] /
+            (p['K3']**p['hill_W'] + W_rate**p['hill_W'])
             - p['nu4'] * Y / (p['K4'] + Y))
     dZdt =  p['nu5'] * Y - p['nu6'] * Z / (p['K6'] + Z)
     dRdt =  p['nu7'] * X - p['nu8'] * R / (p['K7'] + R)
     dSdt =  p['nu9'] * R - p['nu10'] * S / (p['K8'] + S)
 
     # CWO arm — synthesis is lunar-modulated through L_t
-    dCdt = (p['nu11'] * L_t * X * p['K5']**p['hill_W'] / (p['K5']**p['hill_W'] + W**p['hill_W'])
+    dCdt = (p['nu11'] * L_t * X * p['K5']**p['hill_W'] /
+            (p['K5']**p['hill_W'] + W_rate**p['hill_W'])
             - p['nu12'] * C / (p['K9'] + C))
     # Linear protein degradation (see module docstring)
     dWdt = p['nu13'] * C - p['nu14'] * W
