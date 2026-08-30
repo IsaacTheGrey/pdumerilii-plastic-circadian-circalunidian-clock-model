@@ -4,8 +4,9 @@ import numpy as np
 
 from circadian_clock.analysis import (_resolve_sweep_lunar_drives,
                                       analyze_lunar_limit_cycles,
-                                      dominant_period, rhythm_metrics)
-from circadian_clock.model import generate_default_parameters
+                                      dominant_period, rhythm_metrics,
+                                      summarize_lunar_phase_states)
+from circadian_clock.model import T_LUNAR, generate_default_parameters
 
 
 class RhythmMetricsTests(unittest.TestCase):
@@ -50,6 +51,18 @@ class RhythmMetricsTests(unittest.TestCase):
             'Mean drive': 0.75,
             'New moon': 1.00,
         })
+
+    def test_summarizes_cwo_protein_and_per_transcript_by_lunar_phase(self):
+        t = np.arange(0.0, T_LUNAR, 1.0)
+        solution = np.zeros((len(t), 7))
+        solution[:, 1] = t
+        solution[:, 6] = 2.0 * t
+        rows = summarize_lunar_phase_states(t, solution)
+        self.assertEqual(len(rows), 8)
+        self.assertEqual(rows[0]['Moon Phase'], 'Full moon')
+        self.assertTrue(all(row['Sample Count'] > 0 for row in rows))
+        self.assertTrue(all(row['CWO Protein SD Z-score (W)'] > 0
+                            for row in rows))
 
 
 if __name__ == '__main__':

@@ -26,6 +26,82 @@ def normalize_oscillations(solution: np.ndarray) -> np.ndarray:
     return solution / solution.mean(axis=0)
 
 
+# ---------------------------------------------------------------------------
+# Lunar-phase summaries
+# ---------------------------------------------------------------------------
+
+# Phases progress forward from the full-moon reference used by ``_lunar_drive``.
+LUNAR_PHASE_NAMES = (
+    'Full moon', 'Waning gibbous', 'Last quarter', 'Waning crescent',
+    'New moon', 'Waxing crescent', 'First quarter', 'Waxing gibbous',
+)
+
+
+def summarize_lunar_phase_states(t: np.ndarray, solution: np.ndarray,
+                                 zscore: bool = True) -> list[dict]:
+    """Summarize CWO protein (W) and *per* mRNA (Y) in eight moon phases.
+
+    ``t`` may be absolute simulation time.  Samples are assigned modulo the
+    lunar period, with full moon centred on 0 h (the trough of the model's
+    lunar drive).  SD is the sample standard deviation across simulated
+    timepoints within a phase, so it captures the modelled circadian
+    oscillation as well as variation over that lunar-phase interval. By
+    default, W and Y are each standardized across the supplied lunar month
+    before phase summaries are calculated, yielding comparable z-score outputs.
+    """
+    t = np.asarray(t, dtype=float).ravel()
+    solution = np.asarray(solution, dtype=float)
+    if solution.ndim != 2 or solution.shape[0] != len(t) or solution.shape[1] < 7:
+        raise ValueError('solution must have one row per timepoint and seven state columns')
+
+    values_to_summarize = solution.copy()
+    if zscore:
+        for state_index in (1, 6):
+            state = values_to_summarize[:, state_index]
+            sd = float(np.std(state, ddof=1))
+            if sd == 0.0:
+                raise ValueError('cannot z-score a state with zero variance')
+            values_to_summarize[:, state_index] = (state - np.mean(state)) / sd
+        cwo_mean_label = 'CWO Protein Mean Z-score (W)'
+        cwo_sd_label = 'CWO Protein SD Z-score (W)'
+        per_mean_label = 'per Transcript Mean Z-score (Y)'
+        per_sd_label = 'per Transcript SD Z-score (Y)'
+    else:
+        cwo_mean_label = 'CWO Protein Mean (W)'
+        cwo_sd_label = 'CWO Protein SD (W)'
+        per_mean_label = 'per Transcript Mean (Y)'
+        per_sd_label = 'per Transcript SD (Y)'
+
+    phase_width = T_LUNAR / len(LUNAR_PHASE_NAMES)
+    # Shift by half a bin so that phase 0 is centred on the full-moon drive trough.
+    phase_index = np.floor(((np.mod(t, T_LUNAR) + phase_width / 2.0)
+                            % T_LUNAR) / phase_width).astype(int)
+    rows = []
+    for index, phase_name in enumerate(LUNAR_PHASE_NAMES):
+        values = values_to_summarize[phase_index == index]
+        if len(values) == 0:
+            raise ValueError(f'no samples assigned to lunar phase: {phase_name}')
+        rows.append({
+            'Moon Phase': phase_name,
+            cwo_mean_label: float(np.mean(values[:, 6])),
+            cwo_sd_label: float(np.std(values[:, 6], ddof=1)),
+            per_mean_label: float(np.mean(values[:, 1])),
+            per_sd_label: float(np.std(values[:, 1], ddof=1)),
+            'Sample Count': int(len(values)),
+        })
+    return rows
+
+
+def save_lunar_phase_summary(rows: list[dict], filename: str) -> None:
+    """Write :func:`summarize_lunar_phase_states` output as a CSV file."""
+    if not rows:
+        raise ValueError('rows must contain at least one lunar-phase summary')
+    with open(filename, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator='\n')
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def compute_periodogram(signal_1d: np.ndarray, dt: float,
                         pad_factor: int = 10):
     """Periodogram of a 1-D time series.

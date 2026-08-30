@@ -33,6 +33,8 @@ from circadian_clock.analysis import (
     dominant_period,
     normalize_oscillations,
     save_publication_sweep_results,
+    save_lunar_phase_summary,
+    summarize_lunar_phase_states,
 )
 from circadian_clock.fitting import load_observed, weighted_chi2
 from circadian_clock.model import (DEFAULT_INITIAL_STATE, T_LUNAR,
@@ -58,8 +60,6 @@ OBSERVED_XLSX = 'observed_gene_exp.xlsx'
 
 OBSERVED_LUNAR_PHASE_H = 0
 
-# Internal-model time at which ZT0 should be drawn. The model has no a
-# priori ZT0 — pick the offset that lines up CLK/BMAL peak with biology.
 ZT0_OFFSET_H = 20
 
 
@@ -70,7 +70,7 @@ def main():
     RUN_LUNAR_SCAN  = True
     RUN_PHASE_PLANE = True
     RUN_RNASEQ_OVERLAY = False
-    RUN_LUNAR_GENES = False
+    RUN_LUNAR_GENES = True
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -87,11 +87,20 @@ def main():
     print('1) Long simulation for steady-state trajectories...')
     sol = integrate_model(y0, t, base_parameters)
 
-    last_osc = T_LUNAR  # one full lunar month
+    last_osc = 2*T_LUNAR  
     n_keep = int(last_osc / dt)
     t_asymp = np.arange(0, last_osc, dt)
     t_abs_kept = t[-n_keep:]
     sol_asymp = normalize_oscillations(sol[-n_keep:, :])
+
+    # Report z-scored model states for the final settled lunar month. Each
+    # state is standardized separately before its phase summary is calculated.
+    n_summary = int(T_LUNAR / dt)
+    lunar_summary = summarize_lunar_phase_states(t[-n_summary:],
+                                                  sol[-n_summary:, :])
+    summary_path = os.path.join(OUTPUT_DIR, 'lunar_phase_cwo_per_summary.csv')
+    save_lunar_phase_summary(lunar_summary, summary_path)
+    print(f'   Wrote lunar-phase CWO protein/per transcript summary: {summary_path}')
 
     freqs, power = compute_periodogram(sol_asymp[:, 0], dt)
     periods = 1.0 / freqs

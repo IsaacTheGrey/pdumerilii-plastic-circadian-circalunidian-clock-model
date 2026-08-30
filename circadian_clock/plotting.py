@@ -367,9 +367,9 @@ def plot_lunar_limit_cycles(cycles, save_path: str | None = None):
 
     representative_phases = [
         ('FM', 0.0),
-        ('1st quarter', T_LUNAR / 4.0),
+        ('FM+1', T_LUNAR / 4.0),
         ('NM', T_LUNAR / 2.0),
-        ('Last quarter', 3.0 * T_LUNAR / 4.0),
+        ('NM+1', 3.0 * T_LUNAR / 4.0),
     ]
     for label, target_phase in representative_phases:
         cycle = min(
@@ -396,7 +396,7 @@ def plot_lunar_limit_cycles(cycles, save_path: str | None = None):
     colourbar.set_label('Lunar phase')
     colourbar.set_ticks([0.0, T_LUNAR / 4.0, T_LUNAR / 2.0,
                          3.0 * T_LUNAR / 4.0, T_LUNAR])
-    colourbar.set_ticklabels(['FM', '1st quarter', 'NM', 'Last quarter', 'FM'])
+    colourbar.set_ticklabels(['FM', 'FM+1', 'NM', 'NM+1', 'FM'])
     fig.suptitle('Evolution of the circadian limit cycle over the lunar month',
                  fontsize=14)
     fig.subplots_adjust(left=0.07, right=0.88, bottom=0.12, top=0.84,
