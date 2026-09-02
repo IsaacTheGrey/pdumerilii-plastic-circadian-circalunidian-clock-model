@@ -37,7 +37,8 @@ from circadian_clock.analysis import (
     summarize_lunar_phase_states,
 )
 from circadian_clock.fitting import load_observed, weighted_chi2
-from circadian_clock.model import (DEFAULT_INITIAL_STATE, T_LUNAR,
+from circadian_clock.model import (CWO_LUNAR_DELAY_KEY,
+                                   DEFAULT_INITIAL_STATE, T_LUNAR,
                                    generate_default_parameters)
 from circadian_clock.plotting import (
     plot_cwo_amount_vs_period,
@@ -60,7 +61,12 @@ OBSERVED_XLSX = 'observed_gene_exp.xlsx'
 
 OBSERVED_LUNAR_PHASE_H = 0
 
-ZT0_OFFSET_H = 20
+ZT0_OFFSET_H = 16
+
+# Phase lag of the sinusoidal lunar input acting on cwo transcription.
+# Positive values delay the CWO waveform; negative values advance it.
+# Examples: +24 delays it by one day, -24 advances it by one day.
+CWO_LUNAR_DELAY_H = 120
 
 
 def main():
@@ -69,7 +75,7 @@ def main():
     INCLUDE_LUNAR_PHASES_IN_SWEEPS = True
     RUN_LUNAR_SCAN  = True
     RUN_PHASE_PLANE = True
-    RUN_RNASEQ_OVERLAY = False
+    RUN_RNASEQ_OVERLAY = True
     RUN_LUNAR_GENES = True
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -83,8 +89,10 @@ def main():
     # 7 state variables: [X, Y, Z, R, S, C, W]
     y0 = DEFAULT_INITIAL_STATE
     base_parameters = generate_default_parameters()
+    base_parameters[CWO_LUNAR_DELAY_KEY] = CWO_LUNAR_DELAY_H
 
     print('1) Long simulation for steady-state trajectories...')
+    print(f'   CWO lunar modulation delay: {CWO_LUNAR_DELAY_H:+.1f} h')
     sol = integrate_model(y0, t, base_parameters)
 
     last_osc = 2*T_LUNAR  
@@ -160,7 +168,7 @@ def main():
         plot_lunar_limit_cycles(
             cycles,
             save_path=os.path.join(OUTPUT_DIR,
-                                   'lunar_limit_cycles.png'))
+                                   'lunar_limit_cycles.svg'))
 
     # ---- 6. RNA-seq overlay ---------------------------------------------
     if RUN_RNASEQ_OVERLAY:

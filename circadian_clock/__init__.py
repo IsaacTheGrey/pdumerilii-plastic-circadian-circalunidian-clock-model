@@ -11,7 +11,7 @@ fitting      : RNA-seq loading and fixed-model comparison utilities
 plotting     : Figure helpers
 """
 
-from .model import (DEFAULT_INITIAL_STATE, T_LUNAR,
+from .model import (CWO_LUNAR_DELAY_KEY, DEFAULT_INITIAL_STATE, T_LUNAR,
                     generate_default_parameters, goodwin_model_lunar)
 from .simulation import integrate_model
 
@@ -21,4 +21,5 @@ __all__ = [
     "integrate_model",
     "T_LUNAR",
     "DEFAULT_INITIAL_STATE",
+    "CWO_LUNAR_DELAY_KEY",
 ]

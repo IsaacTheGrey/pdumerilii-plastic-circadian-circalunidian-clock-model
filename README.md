@@ -14,10 +14,18 @@ lunar timescale and doing so in anti-phase.
 
 Seven state variables: active CLK/BMAL (X), *per* mRNA (Y), PER/tr-CRY (Z),
 *rev-erb* mRNA (R), REV-ERB (S), *cwo* mRNA (C), and CWO protein (W).
-A single lunar drive `L(t) = 0.75 − 0.25·cos(2π t / T_lunar)` with
+A single lunar drive
+`L(t) = 0.75 − 0.25·cos(2π(t − Δ_CWO) / T_lunar)` with
 `T_lunar = 708 h` multiplies the CWO mRNA synthesis term, troughing at full
-moon and peaking at new moon. See `circadian_clock/model.py` for the full ODE
-system and the manuscript Methods for the symbolic equations.
+moon and peaking at new moon when `Δ_CWO = 0`. In `run_simulation.py`, set
+`CWO_LUNAR_DELAY_H` to a positive number of hours to delay the CWO waveform,
+or a negative number to advance it, relative to the external FM/NM calendar.
+See `circadian_clock/model.py` for the full ODE system and the manuscript
+Methods for the symbolic equations.
+
+The delay applies to continuous lunar simulations and fixed-phase RNA-seq
+evaluation. Parameter sweeps that explicitly freeze `L` at 0.5, 0.75, or 1.0
+remain fixed-drive comparisons and therefore do not use this phase delay.
 
 ## Repository layout
 

@@ -392,14 +392,17 @@ def plot_lunar_limit_cycles(cycles, save_path: str | None = None):
         ax.grid(True, linestyle=':', alpha=0.35)
         ax.set_box_aspect(1)
 
-    colourbar = fig.colorbar(collection, ax=axs, pad=0.025, fraction=0.04)
+    # Use a dedicated axis so the lunar-phase colour legend sits clearly to
+    # the right of both phase-plane panels rather than crowding the second.
+    colourbar_ax = fig.add_axes([0.92, 0.18, 0.018, 0.58])
+    colourbar = fig.colorbar(collection, cax=colourbar_ax)
     colourbar.set_label('Lunar phase')
     colourbar.set_ticks([0.0, T_LUNAR / 4.0, T_LUNAR / 2.0,
                          3.0 * T_LUNAR / 4.0, T_LUNAR])
     colourbar.set_ticklabels(['FM', 'FM+1', 'NM', 'NM+1', 'FM'])
     fig.suptitle('Evolution of the circadian limit cycle over the lunar month',
                  fontsize=14)
-    fig.subplots_adjust(left=0.07, right=0.88, bottom=0.12, top=0.84,
+    fig.subplots_adjust(left=0.07, right=0.84, bottom=0.12, top=0.84,
                         wspace=0.22)
     _finish(fig, save_path, tight=False)
 
@@ -529,7 +532,7 @@ def plot_genes_over_lunar_month(parameters: dict,
     t_plot = t[n_burn:] - t[n_burn]      # restart at 0 for plot readability
     sol_plot = sol[n_burn:, :]
     from .model import _lunar_drive
-    L_t = np.array([_lunar_drive(ti, {}) for ti in t_plot])
+    L_t = np.array([_lunar_drive(ti, parameters) for ti in t_plot])
 
     n_panels = len(genes)
     fig, axs = plt.subplots(n_panels, 1, figsize=(13, 2.4 * n_panels),

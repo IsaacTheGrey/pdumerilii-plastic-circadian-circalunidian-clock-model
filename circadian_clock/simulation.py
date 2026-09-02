@@ -35,5 +35,8 @@ def integrate_at_lunar_phase(y0, t, parameters, lunar_phase_h: float,
         ``lunar_phase_h = 354`` corresponds to NM (L_t peak).
     """
     p = dict(parameters)  # don't mutate the caller's dict
-    p[_LT_OVERRIDE_KEY] = _lunar_drive(lunar_phase_h, {})  # evaluate cleanly
+    p.pop(_LT_OVERRIDE_KEY, None)
+    # Evaluate the chosen external lunar phase with the configured CWO delay,
+    # then freeze that resulting drive throughout the short simulation.
+    p[_LT_OVERRIDE_KEY] = _lunar_drive(lunar_phase_h, p)
     return odeint(goodwin_model_lunar, y0, t, args=(p,), mxstep=mxstep)

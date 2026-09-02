@@ -16,12 +16,14 @@ Lunar modulation
 ----------------
 A single drive with period T_LUNAR = 708 h (~29.5 d):
 
-    L_t(t) = 0.75 - 0.25 · cos(2π t / T_LUNAR)
+    L_t(t) = 0.75 - 0.25 · cos(2π (t - Δ_CWO) / T_LUNAR)
 
-L_t troughs (0.5) at t = 0 (FM) and peaks (1.0) at t = T_LUNAR/2 = 354 h
-(NM). Because L_t multiplies CWO synthesis, this makes CWO oscillate with
-higher mean / larger amplitude at NM and lower / smaller at FM, matching
-the biological expectation in *Platynereis dumerilii*.
+At the default Δ_CWO = 0, L_t troughs (0.5) at t = 0 (FM) and peaks (1.0)
+at t = T_LUNAR/2 = 354 h (NM). Positive Δ_CWO delays the CWO transcriptional
+response relative to the lunar calendar; negative values advance it. Because
+L_t multiplies CWO synthesis, the unshifted model makes CWO oscillate with
+higher mean / larger amplitude at NM and lower / smaller at FM, matching the
+biological expectation in *Platynereis dumerilii*.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ import numpy as np
 
 # Lunar month length in hours.
 T_LUNAR: float = 708.0
+CWO_LUNAR_DELAY_KEY: str = "cwo_lunar_delay_h"
 
 # State order shared by simulations, fitting, plotting, and tests.
 DEFAULT_INITIAL_STATE: tuple[float, ...] = (
@@ -43,10 +46,16 @@ _LT_OVERRIDE_KEY: str = "_L_t_override"
 
 
 def _lunar_drive(t: float, parameters: dict) -> float:
-    """Time-varying lunar drive, or a frozen value if overridden."""
+    """Time-shifted lunar drive, or a frozen value if overridden.
+
+    Positive ``cwo_lunar_delay_h`` delays the waveform; negative values
+    advance it. Parameter dictionaries from older versions remain valid.
+    """
     if _LT_OVERRIDE_KEY in parameters:
         return parameters[_LT_OVERRIDE_KEY]
-    return 0.75 - 0.25 * np.cos(2.0 * np.pi * t / T_LUNAR)
+    delay_h = float(parameters.get(CWO_LUNAR_DELAY_KEY, 0.0))
+    shifted_time = t - delay_h
+    return 0.75 - 0.25 * np.cos(2.0 * np.pi * shifted_time / T_LUNAR)
 
 
 def goodwin_model_lunar(y, t, parameters):
@@ -130,6 +139,9 @@ def generate_default_parameters() -> dict:
         'nu12': 0.05,  # cwo mRNA degradation V_max
         'nu13': 0.8,   # CWO translation
         'nu14': 0.2,   # CWO linear degradation (h^-1); half-life ~3.5 h
+        # Positive values delay the lunar modulation of cwo transcription;
+        # negative values advance it. This is a phase parameter, not a rate.
+        CWO_LUNAR_DELAY_KEY: 0.0,
 
         # Michaelis / Hill constants. K_W is a dedicated half-repression
         # constant for the CWO arm; hill_W = 1 (non-cooperative) keeps the
