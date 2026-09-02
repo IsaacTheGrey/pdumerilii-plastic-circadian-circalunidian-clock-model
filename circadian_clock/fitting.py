@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
-from .model import generate_default_parameters
+from .model import DEFAULT_INITIAL_STATE, generate_default_parameters
 from .simulation import integrate_at_lunar_phase
 
 
@@ -118,7 +118,7 @@ def simulate_24h_zscored(parameters: dict,
         set False inside optimisation loops that already check ``amp_rel``.
     """
     if y0 is None:
-        y0 = [1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+        y0 = DEFAULT_INITIAL_STATE
 
     # Run settle + a longer tail so the period-detection window contains
     # multiple cycles at deep steady state. 240 h ≈ 10 circadian cycles,

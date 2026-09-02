@@ -1,0 +1,87 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=0.8in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{longtable}
+
+\pagestyle{empty}
+\renewcommand{\arraystretch}{1.12}
+
+\begin{document}
+
+\begin{longtable}{@{}llll@{}}
+\caption{Default parameter values used in the circalunar clock model.}
+\label{tab:model_parameters}\\
+\toprule
+Parameter & Value & Units & Description \\
+\midrule
+\endfirsthead
+
+\multicolumn{4}{l}{\tablename\ \thetable\ continued}\\
+\toprule
+Parameter & Value & Units & Description \\
+\midrule
+\endhead
+
+\midrule
+\multicolumn{4}{r}{Continued on next page}\\
+\endfoot
+
+\bottomrule
+\endlastfoot
+
+\multicolumn{4}{@{}l}{\textit{Core-clock kinetic parameters}}\\[1mm]
+$\nu_1$  & 0.70 & $\mathrm{h}^{-1}$ & Scale of CLK/BMAL synthesis \\
+$\nu_2$  & 0.50 & $\mathrm{a.u.}\,\mathrm{h}^{-1}$ & Maximum CLK/BMAL degradation rate \\
+$\nu_3$  & 0.45 & $\mathrm{h}^{-1}$ & \textit{per} transcription coefficient \\
+$\nu_4$  & 0.30 & $\mathrm{a.u.}\,\mathrm{h}^{-1}$ & Maximum \textit{per} mRNA degradation rate \\
+$\nu_5$  & 0.70 & $\mathrm{h}^{-1}$ & PER/CRY translation coefficient \\
+$\nu_6$  & 0.35 & $\mathrm{a.u.}\,\mathrm{h}^{-1}$ & Maximum PER/CRY degradation rate \\
+$\nu_7$  & 0.30 & $\mathrm{h}^{-1}$ & \textit{rev-erb} transcription coefficient \\
+$\nu_8$  & 0.20 & $\mathrm{a.u.}\,\mathrm{h}^{-1}$ & Maximum \textit{rev-erb} mRNA degradation rate \\
+$\nu_9$  & 0.10 & $\mathrm{h}^{-1}$ & REV-ERB translation coefficient \\
+$\nu_{10}$ & 0.20 & $\mathrm{a.u.}\,\mathrm{h}^{-1}$ & Maximum REV-ERB degradation rate \\
+\addlinespace
+
+\multicolumn{4}{@{}l}{\textit{CWO-arm kinetic parameters}}\\[1mm]
+$\nu_{11}$ & 0.20 & $\mathrm{h}^{-1}$ & \textit{cwo} transcription coefficient \\
+$\nu_{12}$ & 0.05 & $\mathrm{a.u.}\,\mathrm{h}^{-1}$ & Maximum \textit{cwo} mRNA degradation rate \\
+$\nu_{13}$ & 0.80 & $\mathrm{h}^{-1}$ & CWO translation coefficient \\
+$\nu_{14}$ & 0.20 & $\mathrm{h}^{-1}$ & First-order CWO protein degradation rate \\
+\addlinespace
+
+\multicolumn{4}{@{}l}{\textit{Michaelis and repression constants}}\\[1mm]
+$K_1$ & 1.0000 & a.u. & Half-repression scale for PER/CRY and REV-ERB \\
+$K_2$ & 1.0000 & a.u. & Michaelis constant for CLK/BMAL degradation \\
+$K_3$ & 1.0000 & a.u. & CWO half-repression constant for \textit{per} transcription \\
+$K_4$ & 1.0000 & a.u. & Michaelis constant for \textit{per} mRNA degradation \\
+$K_5$ & 0.4096 & a.u. & CWO half-repression constant for \textit{cwo} transcription \\
+$K_6$ & 1.0000 & a.u. & Michaelis constant for PER/CRY degradation \\
+$K_7$ & 1.0000 & a.u. & Michaelis constant for \textit{rev-erb} mRNA degradation \\
+$K_8$ & 1.0000 & a.u. & Michaelis constant for REV-ERB degradation \\
+$K_9$ & 1.0000 & a.u. & Michaelis constant for \textit{cwo} mRNA degradation \\
+$K_W$ & 2.0000 & a.u. & CWO half-repression constant for CLK/BMAL activity \\
+\addlinespace
+
+\multicolumn{4}{@{}l}{\textit{Hill exponents and positive feedback}}\\[1mm]
+$h$   & 4.0 & dimensionless & Hill exponent for PER/CRY repression \\
+$h_S$ & 1.5 & dimensionless & Hill exponent for REV-ERB repression \\
+$h_W$ & 1.0 & dimensionless & Hill exponent for CWO-mediated repression \\
+$b$   & 1.0 & a.u. & Basal positive-feedback term \\
+$c$   & 0.5 & dimensionless & Contribution of CLK/BMAL to positive feedback \\
+$d$   & 0.5 & dimensionless & Contribution of CWO to positive feedback \\
+\addlinespace
+
+\multicolumn{4}{@{}l}{\textit{Lunar timing parameters}}\\[1mm]
+$T_{\mathrm{L}}$ & 708 & h & Lunar-cycle period \\
+$\Delta_{\mathrm{CWO}}$ & 0 & h & Phase delay of lunar modulation of \textit{cwo} transcription \\
+
+\end{longtable}
+
+\noindent\footnotesize
+State-variable concentrations are expressed in arbitrary units (a.u.).
+Positive values of $\Delta_{\mathrm{CWO}}$ delay the lunar modulation,
+whereas negative values advance it.
+
+\end{document}

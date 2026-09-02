@@ -1,0 +1,53 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+\begin{center}
+{\large\bfseries Model equations}
+\end{center}
+
+The lunar modulation of \textit{cwo} transcription is defined as
+\begin{equation}
+L(t)=0.75-0.25\cos\!\left(
+\frac{2\pi\left(t-\Delta_{\mathrm{CWO}}\right)}{T_{\mathrm{L}}}
+\right),
+\qquad T_{\mathrm{L}}=708\ \mathrm{h}.
+\end{equation}
+
+The regulatory functions are
+\begin{align}
+I_Z(Z) &= \frac{K_1^{h}}{K_1^{h}+Z^{h}}, &
+I_S(S) &= \frac{K_1^{h_S}}{K_1^{h_S}+S^{h_S}}, \\
+I_W(W) &= \frac{K_W^{h_W}}{K_W^{h_W}+W^{h_W}}, &
+A(X,W) &= b+cX+dW, \\
+H_3(W) &= \frac{K_3^{h_W}}{K_3^{h_W}+W^{h_W}}, &
+H_5(W) &= \frac{K_5^{h_W}}{K_5^{h_W}+W^{h_W}}.
+\end{align}
+
+The model is described by the following system of ordinary differential
+equations:
+\begin{align}
+\frac{\mathrm{d}X}{\mathrm{d}t}
+&= \nu_1 I_Z(Z)I_W(W)I_S(S)A(X,W)
+-\nu_2\frac{X}{K_2+X}, \\
+\frac{\mathrm{d}Y}{\mathrm{d}t}
+&= \nu_3 XH_3(W)-\nu_4\frac{Y}{K_4+Y}, \\
+\frac{\mathrm{d}Z}{\mathrm{d}t}
+&= \nu_5Y-\nu_6\frac{Z}{K_6+Z}, \\
+\frac{\mathrm{d}R}{\mathrm{d}t}
+&= \nu_7X-\nu_8\frac{R}{K_7+R}, \\
+\frac{\mathrm{d}S}{\mathrm{d}t}
+&= \nu_9R-\nu_{10}\frac{S}{K_8+S}, \\
+\frac{\mathrm{d}C}{\mathrm{d}t}
+&= \nu_{11}L(t)XH_5(W)-\nu_{12}\frac{C}{K_9+C}, \\
+\frac{\mathrm{d}W}{\mathrm{d}t}
+&= \nu_{13}C-\nu_{14}W.
+\end{align}
+
+\end{document}

@@ -11,9 +11,9 @@ import csv
 from multiprocessing import Pool
 
 import numpy as np
-from scipy.signal import periodogram
+from scipy.signal import find_peaks, periodogram
 
-from .model import T_LUNAR
+from .model import DEFAULT_INITIAL_STATE, T_LUNAR, _LT_OVERRIDE_KEY
 from .simulation import integrate_model
 
 
@@ -26,13 +26,89 @@ def normalize_oscillations(solution: np.ndarray) -> np.ndarray:
     return solution / solution.mean(axis=0)
 
 
+# ---------------------------------------------------------------------------
+# Lunar-phase summaries
+# ---------------------------------------------------------------------------
+
+# Phases progress forward from the full-moon reference used by ``_lunar_drive``.
+LUNAR_PHASE_NAMES = (
+    'Full moon', 'Waning gibbous', 'Last quarter', 'Waning crescent',
+    'New moon', 'Waxing crescent', 'First quarter', 'Waxing gibbous',
+)
+
+
+def summarize_lunar_phase_states(t: np.ndarray, solution: np.ndarray,
+                                 zscore: bool = True) -> list[dict]:
+    """Summarize CWO protein (W) and *per* mRNA (Y) in eight moon phases.
+
+    ``t`` may be absolute simulation time.  Samples are assigned modulo the
+    lunar period, with full moon centred on 0 h (the trough of the model's
+    lunar drive).  SD is the sample standard deviation across simulated
+    timepoints within a phase, so it captures the modelled circadian
+    oscillation as well as variation over that lunar-phase interval. By
+    default, W and Y are each standardized across the supplied lunar month
+    before phase summaries are calculated, yielding comparable z-score outputs.
+    """
+    t = np.asarray(t, dtype=float).ravel()
+    solution = np.asarray(solution, dtype=float)
+    if solution.ndim != 2 or solution.shape[0] != len(t) or solution.shape[1] < 7:
+        raise ValueError('solution must have one row per timepoint and seven state columns')
+
+    values_to_summarize = solution.copy()
+    if zscore:
+        for state_index in (1, 6):
+            state = values_to_summarize[:, state_index]
+            sd = float(np.std(state, ddof=1))
+            if sd == 0.0:
+                raise ValueError('cannot z-score a state with zero variance')
+            values_to_summarize[:, state_index] = (state - np.mean(state)) / sd
+        cwo_mean_label = 'CWO Protein Mean Z-score (W)'
+        cwo_sd_label = 'CWO Protein SD Z-score (W)'
+        per_mean_label = 'per Transcript Mean Z-score (Y)'
+        per_sd_label = 'per Transcript SD Z-score (Y)'
+    else:
+        cwo_mean_label = 'CWO Protein Mean (W)'
+        cwo_sd_label = 'CWO Protein SD (W)'
+        per_mean_label = 'per Transcript Mean (Y)'
+        per_sd_label = 'per Transcript SD (Y)'
+
+    phase_width = T_LUNAR / len(LUNAR_PHASE_NAMES)
+    # Shift by half a bin so that phase 0 is centred on the full-moon drive trough.
+    phase_index = np.floor(((np.mod(t, T_LUNAR) + phase_width / 2.0)
+                            % T_LUNAR) / phase_width).astype(int)
+    rows = []
+    for index, phase_name in enumerate(LUNAR_PHASE_NAMES):
+        values = values_to_summarize[phase_index == index]
+        if len(values) == 0:
+            raise ValueError(f'no samples assigned to lunar phase: {phase_name}')
+        rows.append({
+            'Moon Phase': phase_name,
+            cwo_mean_label: float(np.mean(values[:, 6])),
+            cwo_sd_label: float(np.std(values[:, 6], ddof=1)),
+            per_mean_label: float(np.mean(values[:, 1])),
+            per_sd_label: float(np.std(values[:, 1], ddof=1)),
+            'Sample Count': int(len(values)),
+        })
+    return rows
+
+
+def save_lunar_phase_summary(rows: list[dict], filename: str) -> None:
+    """Write :func:`summarize_lunar_phase_states` output as a CSV file."""
+    if not rows:
+        raise ValueError('rows must contain at least one lunar-phase summary')
+    with open(filename, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator='\n')
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def compute_periodogram(signal_1d: np.ndarray, dt: float,
                         pad_factor: int = 10):
     """Periodogram of a 1-D time series.
 
     Returns ``(frequencies, power)`` with the zero-frequency bin removed.
-    Frequency resolution is increased ``pad_factor``-fold by zero-padding
-    the FFT input.
+    Zero-padding interpolates the displayed spectrum but does not add
+    independent frequency information.
     """
     signal_1d = np.asarray(signal_1d).ravel()
     freqs, power = periodogram(signal_1d, fs=1.0 / dt,
@@ -41,24 +117,104 @@ def compute_periodogram(signal_1d: np.ndarray, dt: float,
     return freqs[nonzero], power[nonzero]
 
 
+def _refined_peak_times(signal_1d: np.ndarray, peaks: np.ndarray,
+                        dt: float) -> np.ndarray:
+    """Return peak times with three-point parabolic sub-step refinement."""
+    sig = np.asarray(signal_1d, dtype=float)
+    refined = []
+    for peak in peaks:
+        offset = 0.0
+        if 0 < peak < len(sig) - 1:
+            left, centre, right = sig[peak - 1: peak + 2]
+            denom = left - 2.0 * centre + right
+            if denom != 0.0:
+                offset = float(np.clip(0.5 * (left - right) / denom,
+                                       -0.5, 0.5))
+        refined.append((peak + offset) * dt)
+    return np.asarray(refined)
+
+
+def rhythm_metrics(signal_1d: np.ndarray, dt: float,
+                   band=(18.0, 30.0), min_intervals: int = 4,
+                   min_relative_amplitude: float = 0.05,
+                   max_interval_cv: float = 0.15,
+                   min_sustained_ratio: float = 0.25) -> dict:
+    """Measure period and oscillator quality from time-domain peaks.
+
+    A period is reported only for a sustained, sufficiently regular rhythm.
+    This prevents a slow lunar trend or a damped trajectory from being
+    assigned the edge of the requested Fourier band.
+    """
+    sig = np.asarray(signal_1d, dtype=float).ravel()
+    result = {
+        'period': np.nan,
+        'relative_amplitude': np.nan,
+        'interval_cv': np.nan,
+        'n_peaks': 0,
+        'sustained_ratio': np.nan,
+        'rhythmic': False,
+        'status': 'invalid_signal',
+    }
+    if len(sig) < 3 or not np.isfinite(sig).all() or dt <= 0:
+        return result
+
+    amplitude = float(np.ptp(sig))
+    scale = max(abs(float(np.mean(sig))), 1e-9)
+    relative_amplitude = amplitude / scale
+    result['relative_amplitude'] = relative_amplitude
+    if relative_amplitude < min_relative_amplitude:
+        result['status'] = 'low_amplitude'
+        return result
+
+    thirds = [chunk for chunk in np.array_split(sig, 3) if len(chunk)]
+    segment_amplitudes = np.asarray([np.ptp(chunk) for chunk in thirds])
+    max_segment_amplitude = float(segment_amplitudes.max())
+    sustained_ratio = (float(segment_amplitudes.min()) /
+                       max(max_segment_amplitude, 1e-12))
+    result['sustained_ratio'] = sustained_ratio
+    if sustained_ratio < min_sustained_ratio:
+        result['status'] = 'not_sustained'
+        return result
+
+    min_distance = max(1, int(0.75 * band[0] / dt))
+    prominence = max(0.10 * amplitude, 1e-12)
+    peaks, _ = find_peaks(sig, distance=min_distance,
+                          prominence=prominence)
+    result['n_peaks'] = int(len(peaks))
+    if len(peaks) < min_intervals + 1:
+        result['status'] = 'insufficient_peaks'
+        return result
+
+    peak_times = _refined_peak_times(sig, peaks, dt)
+    intervals = np.diff(peak_times)
+    valid = intervals[(intervals >= band[0]) & (intervals <= band[1])]
+    if len(valid) < min_intervals:
+        result['status'] = 'period_outside_band'
+        return result
+
+    period = float(np.median(valid))
+    interval_cv = float(np.std(valid, ddof=1) / np.mean(valid)) \
+        if len(valid) > 1 else 0.0
+    result['interval_cv'] = interval_cv
+    if interval_cv > max_interval_cv:
+        result['status'] = 'irregular_period'
+        return result
+
+    result.update(period=period, rhythmic=True, status='rhythmic')
+    return result
+
+
 def dominant_period(signal_1d: np.ndarray, dt: float,
                     band=(18.0, 30.0), pad_factor: int = 10) -> float:
-    """Dominant Fourier period of ``signal_1d`` within ``band`` (hours).
+    """Period of a sustained rhythm within ``band``, or ``nan``.
 
-    Returns ``nan`` if no peak falls in band or if the signal is essentially
-    flat (amplitude < 5 % of the mean across the segment).
+    ``pad_factor`` is retained for API compatibility. Period estimation is
+    now based on refined time-domain peaks; the periodogram remains available
+    separately for display and corroboration.
     """
-    sig = np.asarray(signal_1d).ravel()
-    if np.ptp(sig) < 0.05 * max(abs(sig.mean()), 1e-9):
-        return np.nan
-    freqs, power = compute_periodogram(sig, dt, pad_factor=pad_factor)
-    periods = 1.0 / freqs
-    in_band = (periods >= band[0]) & (periods <= band[1])
-    if not in_band.any():
-        return np.nan
-    idx_band = np.where(in_band)[0]
-    best = idx_band[np.argmax(power[in_band])]
-    return periods[best]
+    del pad_factor
+    return rhythm_metrics(signal_1d, dt, band=band,
+                          min_intervals=2)['period']
 
 
 # ---------------------------------------------------------------------------
@@ -109,12 +265,165 @@ def save_sensitivity_results(sensitivity_results: dict, filename: str) -> None:
     """Write sweep results to CSV in long format."""
     with open(filename, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=['Parameter', 'Value',
-                                               'Dominant Period'])
+                                               'Dominant Period'],
+                                lineterminator='\n')
         writer.writeheader()
         for name, (values, periods) in sensitivity_results.items():
             for v, per in zip(values, periods):
                 writer.writerow({'Parameter': name, 'Value': v,
                                  'Dominant Period': per})
+
+
+def _fixed_phase_sweep_worker(args):
+    """Evaluate one parameter/mechanism at one frozen lunar drive."""
+    (name, fold, lunar_label, lunar_drive, base_parameters, y0, t,
+     analysis_points, band) = args
+    p = base_parameters.copy()
+    p[_LT_OVERRIDE_KEY] = lunar_drive
+
+    if name == 'W gain (nu13/nu14)':
+        # Change protein abundance gain while preserving W's time constant.
+        p['nu13'] *= fold
+        parameter_value = p['nu13'] / p['nu14']
+    elif name == 'W turnover speed':
+        # Scale production and degradation together: gain stays fixed while
+        # the response time 1/nu14 changes.
+        p['nu13'] *= fold
+        p['nu14'] *= fold
+        parameter_value = p['nu14']
+    else:
+        p[name] *= fold
+        parameter_value = p[name]
+
+    sol = integrate_model(y0, t, p)
+    tail = sol[-analysis_points:, :]
+    metrics = rhythm_metrics(tail[:, 0], t[1] - t[0], band=band)
+    return {
+        'Parameter': name,
+        'Fold Change': float(fold),
+        'Parameter Value': float(parameter_value),
+        'Drive Condition': lunar_label,
+        'Fixed L': float(lunar_drive),
+        'Period (h)': metrics['period'],
+        'Relative Amplitude': metrics['relative_amplitude'],
+        'Interval CV': metrics['interval_cv'],
+        'Peak Count': metrics['n_peaks'],
+        'Sustained Ratio': metrics['sustained_ratio'],
+        'Mean C': float(np.mean(tail[:, 5])),
+        'Mean W': float(np.mean(tail[:, 6])),
+        'W Gain (nu13/nu14)': float(p['nu13'] / p['nu14']),
+        'W Turnover Rate (h^-1)': float(p['nu14']),
+        'W Half-life (h)': float(np.log(2.0) / p['nu14']),
+        'Rhythmic': metrics['rhythmic'],
+        'Status': metrics['status'],
+    }
+
+
+def _run_fixed_phase_sweep(names, base_parameters, y0, folds,
+                           lunar_drives, dt, settle_hours, analysis_hours,
+                           band, processes):
+    folds = np.asarray(folds, dtype=float)
+    if not np.any(np.isclose(folds, 1.0)):
+        folds = np.sort(np.append(folds, 1.0))
+    t = np.arange(0.0, settle_hours + analysis_hours, dt)
+    analysis_points = int(analysis_hours / dt)
+    work = [
+        (name, fold, lunar_label, lunar_drive, base_parameters, y0, t,
+         analysis_points, band)
+        for name in names
+        for lunar_label, lunar_drive in lunar_drives.items()
+        for fold in folds
+    ]
+    if processes == 1:
+        rows = [_fixed_phase_sweep_worker(item) for item in work]
+    else:
+        with Pool(processes=processes) as pool:
+            rows = pool.map(_fixed_phase_sweep_worker, work)
+    return rows
+
+
+def _resolve_sweep_lunar_drives(lunar_drives, include_lunar_phases: bool):
+    """Return fixed drive conditions for a publication parameter sweep.
+
+    An explicitly supplied mapping always takes precedence. Otherwise the
+    default is a single constant-mean drive, which removes lunar phase from
+    the sweep. Setting ``include_lunar_phases`` adds the two drive extremes.
+    """
+    if lunar_drives is not None:
+        return lunar_drives
+    if include_lunar_phases:
+        return {
+            'Full moon': 0.50,
+            'Mean drive': 0.75,
+            'New moon': 1.00,
+        }
+    return {'Constant mean': 0.75}
+
+
+def analyze_cwo_phase_sensitivity(base_parameters, y0,
+                                  cwo_params=('nu11', 'nu12',
+                                              'nu13', 'nu14'),
+                                  folds=None,
+                                  lunar_drives=None,
+                                  dt: float = 0.1,
+                                  settle_hours: float = 2400.0,
+                                  analysis_hours: float = 720.0,
+                                  band=(18.0, 30.0),
+                                  processes: int | None = 1,
+                                  include_lunar_phases: bool = False):
+    """Publication sweep of all C/W kinetics at fixed lunar drive(s).
+
+    The returned long-format rows include period, oscillator-quality metrics,
+    and mean C/W abundance. Non-rhythmic simulations retain a row with a NaN
+    period and an explicit failure status. By default the lunar multiplier is
+    held at its cycle mean (L=0.75), preserving average CWO synthesis while
+    removing phase-dependent forcing. Set ``include_lunar_phases=True`` to
+    compare fixed full-moon (0.5), mean (0.75), and new-moon (1.0) drives.
+    A custom ``lunar_drives`` mapping takes precedence over this switch.
+    """
+    if folds is None:
+        folds = np.geomspace(0.5, 2.0, 13)
+    lunar_drives = _resolve_sweep_lunar_drives(
+        lunar_drives, include_lunar_phases)
+    return _run_fixed_phase_sweep(
+        cwo_params, base_parameters, y0, folds, lunar_drives, dt,
+        settle_hours, analysis_hours, band, processes)
+
+
+def analyze_w_gain_turnover(base_parameters, y0, folds=None,
+                            lunar_drives=None, dt: float = 0.1,
+                            settle_hours: float = 2400.0,
+                            analysis_hours: float = 720.0,
+                            band=(18.0, 30.0),
+                            processes: int | None = 1,
+                            include_lunar_phases: bool = False):
+    """Separate W abundance gain from turnover at fixed lunar drive(s).
+
+    ``W gain`` varies nu13/nu14 at fixed nu14. ``W turnover speed`` scales
+    nu13 and nu14 together, preserving their ratio while changing the W
+    response time. The default lunar multiplier is held at its mean, L=0.75.
+    Set ``include_lunar_phases=True`` to also evaluate fixed full-moon and
+    new-moon drives. A custom ``lunar_drives`` mapping takes precedence.
+    """
+    if folds is None:
+        folds = np.geomspace(0.5, 2.0, 13)
+    lunar_drives = _resolve_sweep_lunar_drives(
+        lunar_drives, include_lunar_phases)
+    names = ('W gain (nu13/nu14)', 'W turnover speed')
+    return _run_fixed_phase_sweep(
+        names, base_parameters, y0, folds, lunar_drives, dt,
+        settle_hours, analysis_hours, band, processes)
+
+
+def save_publication_sweep_results(rows: list[dict], filename: str) -> None:
+    """Write long-format validated sweep rows to CSV."""
+    if not rows:
+        raise ValueError('No sweep rows to save')
+    with open(filename, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]),
+                                lineterminator='\n')
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -125,11 +434,13 @@ def analyze_cwo_plasticity(base_parameters, y0, t,
                            cwo_params=('nu11', 'nu14'),
                            n_points: int = 50,
                            fold_range=(0.1, 5.0),
-                           band=(18.0, 30.0)):
-    """How CWO synthesis (nu11) and degradation (nu14) shift the period.
+                           band=(18.0, 30.0),
+                           lunar_drive: float = 0.75):
+    """Legacy two-parameter sweep at a frozen lunar drive.
 
     Returns ``{param: (values, periods)}`` with NaN at any value that fails
-    the circadian-band filter.
+    the sustained-rhythmicity checks. New analyses should prefer
+    :func:`analyze_cwo_phase_sensitivity`.
     """
     dt = t[1] - t[0]
     out = {}
@@ -143,6 +454,7 @@ def analyze_cwo_plasticity(base_parameters, y0, t,
         for v in values:
             p = base_parameters.copy()
             p[name] = v
+            p[_LT_OVERRIDE_KEY] = lunar_drive
             sol = integrate_model(y0, t, p)
             window = int(300.0 / dt)
             bmal = sol[-window:, 0]
@@ -195,3 +507,52 @@ def analyze_lunar_period_oscillation(base_parameters, y0,
 
     order = np.argsort(lunar_times)
     return np.array(lunar_times)[order], np.array(observed_periods)[order]
+
+
+def analyze_lunar_limit_cycles(base_parameters, y0=None,
+                               x_index: int = 0, y_index: int = 2,
+                               dt: float = 0.1,
+                               n_burn_cycles: int = 2,
+                               band=(18.0, 30.0)) -> list[dict]:
+    """Extract individual circadian phase-plane loops over a lunar month.
+
+    Each loop runs from one CLK/BMAL peak to the next. Its lunar phase is the
+    midpoint of that peak-to-peak interval in the final simulated month.
+    A short extension beyond the month boundary permits extraction of the
+    complete loop centred near the final full moon.
+    """
+    if y0 is None:
+        y0 = DEFAULT_INITIAL_STATE
+
+    analysis_start = n_burn_cycles * T_LUNAR
+    analysis_end = analysis_start + T_LUNAR
+    t = np.arange(0.0, analysis_end + band[1], dt)
+    sol = integrate_model(y0, t, base_parameters)
+
+    x = sol[:, x_index]
+    start_search = max(0, int((analysis_start - band[1]) / dt))
+    x_search = x[start_search:]
+    prominence = max(0.10 * np.ptp(x_search), 1e-12)
+    peaks, _ = find_peaks(
+        x_search,
+        distance=max(1, int(0.75 * band[0] / dt)),
+        prominence=prominence)
+    peaks = peaks + start_search
+
+    cycles = []
+    for left, right in zip(peaks[:-1], peaks[1:]):
+        period_h = (right - left) * dt
+        midpoint = 0.5 * (t[left] + t[right])
+        if not (analysis_start <= midpoint < analysis_end):
+            continue
+        if not (band[0] <= period_h <= band[1]):
+            continue
+        cycles.append({
+            'lunar_phase_h': float((midpoint - analysis_start) % T_LUNAR),
+            'period_h': float(period_h),
+            'x': np.asarray(sol[left:right + 1, x_index]),
+            'y': np.asarray(sol[left:right + 1, y_index]),
+        })
+
+    cycles.sort(key=lambda cycle: cycle['lunar_phase_h'])
+    return cycles
